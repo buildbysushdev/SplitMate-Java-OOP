@@ -1,3 +1,6 @@
 *.class
 splitmate.txt
 transactions.dat
+expenses.txt
+output/
+.vscode/
