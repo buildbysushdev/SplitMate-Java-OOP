@@ -5,302 +5,414 @@ import java.awt.event.*;
 import java.io.IOException;
 import java.util.*;
 import javax.swing.*;
+import javax.swing.border.*;
 import javax.swing.table.DefaultTableModel;
 import model.*;
 import service.*;
 
-public class Dashboard extends JFrame implements ActionListener, MouseListener {
-    static final String FILE = "splitmate.txt";
-    ExpenseManager manager = new ExpenseManager();
+// Practical 10: GUI - the main window (Swing)
+public class Dashboard extends JFrame {
+    private static final String FILE = "splitmate.txt";
+    private static final Color TEAL = new Color(0, 128, 114);
 
-    // ---- form ----
-    JTextField title = new JTextField(), amount = new JTextField(), fee = new JTextField("0"), custom = new JTextField();
-    JComboBox<String> payer = new JComboBox<String>();
-    JComboBox<String> category = new JComboBox<String>(new String[] {"Food", "Travel", "Food Delivery", "Other"});
-    JComboBox<String> split = new JComboBox<String>(new String[] {"Equal", "Custom"});
-    JPanel people = new JPanel(new FlowLayout(FlowLayout.LEFT));
-    ArrayList<JCheckBox> boxes = new ArrayList<JCheckBox>();
+    private final ExpenseManager manager = new ExpenseManager();
 
-    // ---- tables and areas ----
-    DefaultTableModel expModel = new DefaultTableModel(new String[] {"ID", "Title", "Category", "Paid by", "Total (Rs)", "Split between"}, 0);
-    JTable expTable = new JTable(expModel);
-    DefaultTableModel balModel = new DefaultTableModel(new String[] {"Member", "Paid (Rs)", "Share (Rs)", "Net (Rs)", "Status"}, 0);
-    JTable balTable = new JTable(balModel);
-    JTextArea settleArea = new JTextArea();
-    JTextArea details = new JTextArea(3, 20);
-    JTabbedPane tabs = new JTabbedPane();
-    JLabel status = new JLabel("Ready");
-    JLabel reminder = new JLabel("Reminder: ...");
+    // form
+    private JTextField titleField = new JTextField();
+    private JTextField amountField = new JTextField();
+    private JComboBox<String> paidByBox = new JComboBox<String>();
+    private JComboBox<String> categoryBox =
+            new JComboBox<String>(new String[]{"Food", "Travel", "Food Delivery", "Other"});
+    private JTextField feeField = new JTextField("0");
+    private JComboBox<String> splitBox = new JComboBox<String>(new String[]{"Equal", "Custom"});
+    private JTextField sharesField = new JTextField();
+    private JPanel checkPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+    private ArrayList<JCheckBox> checks = new ArrayList<JCheckBox>();
 
-    public Dashboard(String username) {
-        super("SplitMate   |   Logged in as: " + username);
-        setLayout(new BorderLayout());
+    // tabs
+    private JTabbedPane tabs = new JTabbedPane();
+    private DefaultTableModel expenseModel = new DefaultTableModel(
+            new String[]{"ID", "Title", "Category", "Paid by", "Total (Rs)", "Split between"}, 0) {
+        public boolean isCellEditable(int r, int c) { return false; }
+    };
+    private DefaultTableModel balanceModel = new DefaultTableModel(
+            new String[]{"Member", "Paid (Rs)", "Share (Rs)", "Net (Rs)", "Status"}, 0) {
+        public boolean isCellEditable(int r, int c) { return false; }
+    };
+    private JTable expenseTable = new JTable(expenseModel);
+    private JTable balanceTable = new JTable(balanceModel);
+    private JTextArea settleArea = new JTextArea();
 
-        JLabel banner = new JLabel("  SplitMate  -  Spend together, settle easily.", JLabel.LEFT);
-        banner.setOpaque(true);
-        banner.setBackground(new Color(0, 121, 107));
-        banner.setForeground(Color.WHITE);
-        banner.setFont(new Font("SansSerif", Font.BOLD, 18));
-        banner.setPreferredSize(new Dimension(100, 36));
+    // bottom
+    private JTextArea detailsArea = new JTextArea(4, 40);
+    private JLabel reminderLabel = new JLabel(" ");
+    private JLabel statusLabel = new JLabel(" ");
 
-        // ---- expense form ----
-        JPanel form = new JPanel(new GridLayout(3, 4, 6, 6));
-        form.add(new JLabel("Title:"));        form.add(title);
-        form.add(new JLabel("Amount (Rs):"));  form.add(amount);
-        form.add(new JLabel("Paid by:"));      form.add(payer);
-        form.add(new JLabel("Category:"));     form.add(category);
-        form.add(new JLabel("Delivery fee:")); form.add(fee);
-        form.add(new JLabel("Split type:"));   form.add(split);
-        JPanel customRow = new JPanel(new BorderLayout(6, 0));
-        customRow.add(new JLabel("Custom shares (Name=Amount, ...):"), BorderLayout.WEST);
-        customRow.add(custom, BorderLayout.CENTER);
-        people.setBorder(BorderFactory.createTitledBorder("Shared between"));
+    private AutoSaveThread autoSave;
+    private ReminderThread reminder;
 
-        title.setName("title"); amount.setName("amount"); fee.setName("fee"); custom.setName("custom");
-        payer.setName("payer"); category.setName("category"); split.setName("split");
-        expTable.setName("expTable"); balTable.setName("balTable"); settleArea.setName("settleArea");
-        details.setName("details"); status.setName("status"); reminder.setName("reminder"); tabs.setName("tabs");
-        fee.setEnabled(false);
-        custom.setEnabled(false);
-        category.setActionCommand("category");  category.addActionListener(this);
-        split.setActionCommand("split");        split.addActionListener(this);
+    public Dashboard(String user) {
+        super("SplitMate   |   Logged in as: " + user);
+        setSize(820, 720);
+        setLocationRelativeTo(null);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
 
-        JPanel buttons = new JPanel(new FlowLayout());
-        String[][] btn = {{"Add Expense", "add"}, {"Delete Selected", "delete"}, {"Add Member", "member"},
-                          {"Settle Up", "settle"}, {"Save", "save"}, {"Load", "load"}, {"Clear", "clear"}};
-        for (String[] b : btn) {
-            JButton jb = new JButton(b[0]);
-            jb.setName(b[1]);
-            jb.setActionCommand(b[1]);
-            jb.addActionListener(this);          // Practical 11: ActionListener
-            buttons.add(jb);
-        }
-
-        JPanel input = new JPanel(new BorderLayout(4, 4));
-        input.setBorder(BorderFactory.createTitledBorder("New expense"));
-        JPanel formAll = new JPanel(new BorderLayout(4, 4));
-        formAll.add(form, BorderLayout.NORTH);
-        formAll.add(customRow, BorderLayout.CENTER);
-        formAll.add(people, BorderLayout.SOUTH);
-        input.add(formAll, BorderLayout.CENTER);
-        input.add(buttons, BorderLayout.SOUTH);
-
-        JPanel top = new JPanel(new BorderLayout());
-        top.add(banner, BorderLayout.NORTH);
-        top.add(input, BorderLayout.CENTER);
-
-        // ---- tabs ----
-        expTable.addMouseListener(this);         // Practical 11: MouseListener
-        settleArea.setEditable(false);
-        settleArea.setFont(new Font("Monospaced", Font.PLAIN, 14));
-        details.setEditable(false);
-        details.setBorder(BorderFactory.createTitledBorder("Expense details (click a row)"));
-        tabs.addTab("Expenses", new JScrollPane(expTable));
-        tabs.addTab("Balances", new JScrollPane(balTable));
-        tabs.addTab("Settle Up", new JScrollPane(settleArea));
-
-        JPanel bottom = new JPanel(new BorderLayout());
-        bottom.add(new JScrollPane(details), BorderLayout.NORTH);
-        JPanel bars = new JPanel(new GridLayout(2, 1));
-        reminder.setForeground(new Color(183, 28, 28));
-        bars.add(reminder);
-        bars.add(status);
-        bottom.add(bars, BorderLayout.SOUTH);
-
-        add(top, BorderLayout.NORTH);
-        add(tabs, BorderLayout.CENTER);
-        add(bottom, BorderLayout.SOUTH);
-
-        // ---- load old data or sample data ----
         try {
-            if (manager.loadFromFile(FILE) == 0) addSampleData();
+            manager.loadFromFile(FILE);                 // Practical 7: read saved data
         } catch (IOException e) {
-            status.setText("Could not read file");
+            statusLabel.setText("Could not read " + FILE);
         }
-        rebuildMembers();
-        refresh();
 
-        new AutoSaveThread(manager, FILE, status, 10).start();     // Practical 8: thread 1
-        new ReminderThread(manager, reminder, 4).start();          // Practical 8: thread 2
+        buildScreen();
+        rebuildPeople();
+        refresh();
+        startThreads();
 
         addWindowListener(new WindowAdapter() {
-            public void windowClosing(WindowEvent e) {
-                try { manager.saveToFile(FILE); } catch (IOException ex) { }
-            }
+            public void windowClosing(WindowEvent e) { closeApp(); }
         });
-        setSize(820, 700);
-        setLocationRelativeTo(null);
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setVisible(true);
     }
 
-    void addSampleData() {
+    // ------------------------------------------------------------ screen
+    private void buildScreen() {
+        JLabel header = new JLabel("  SplitMate  -  Spend together, settle easily.");
+        header.setOpaque(true);
+        header.setBackground(TEAL);
+        header.setForeground(Color.WHITE);
+        header.setFont(new Font("SansSerif", Font.BOLD, 20));
+        header.setBorder(new EmptyBorder(10, 4, 10, 4));
+
+        JPanel north = new JPanel(new BorderLayout());
+        north.add(header, BorderLayout.NORTH);
+        north.add(buildForm(), BorderLayout.CENTER);
+
+        expenseTable.setRowHeight(20);
+        expenseTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        expenseTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) showDetails();
+        });
+        balanceTable.setRowHeight(20);
+        settleArea.setEditable(false);
+        settleArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
+
+        tabs.addTab("Expenses", new JScrollPane(expenseTable));
+        tabs.addTab("Balances", new JScrollPane(balanceTable));
+        tabs.addTab("Settle Up", new JScrollPane(settleArea));
+
+        detailsArea.setEditable(false);
+        detailsArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
+        JScrollPane detailsScroll = new JScrollPane(detailsArea);
+        detailsScroll.setBorder(titled("Expense details (click a row)"));
+
+        reminderLabel.setForeground(new Color(200, 30, 30));
+        JPanel south = new JPanel();
+        south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
+        detailsScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+        reminderLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        statusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        south.add(detailsScroll);
+        south.add(reminderLabel);
+        south.add(statusLabel);
+
+        setLayout(new BorderLayout());
+        add(north, BorderLayout.NORTH);
+        add(tabs, BorderLayout.CENTER);
+        add(south, BorderLayout.SOUTH);
+    }
+
+    private JPanel buildForm() {
+        JPanel form = new JPanel(new GridBagLayout());
+        form.setBorder(titled("New expense"));
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(5, 8, 5, 8);
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.anchor = GridBagConstraints.WEST;
+
+        addRow(form, c, 0, "Title:", titleField, "Amount (Rs):", amountField);
+        addRow(form, c, 1, "Paid by:", paidByBox, "Category:", categoryBox);
+        addRow(form, c, 2, "Delivery fee:", feeField, "Split type:", splitBox);
+
+        c.gridy = 3; c.gridx = 0; c.gridwidth = 1; c.weightx = 0;
+        form.add(new JLabel("Custom shares (Name=Amount, ...):"), c);
+        c.gridx = 1; c.gridwidth = 3; c.weightx = 1;
+        form.add(sharesField, c);
+
+        checkPanel.setBorder(titled("Shared between"));
+        c.gridy = 4; c.gridx = 0; c.gridwidth = 4;
+        form.add(checkPanel, c);
+
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 4));
+        buttons.add(button("Add Expense", e -> addExpense()));
+        buttons.add(button("Delete Selected", e -> deleteSelected()));
+        buttons.add(button("Add Member", e -> addMember()));
+        buttons.add(button("Settle Up", e -> { tabs.setSelectedIndex(2); refresh(); }));
+        buttons.add(button("Save", e -> save()));
+        buttons.add(button("Load", e -> load()));
+        buttons.add(button("Clear", e -> clearForm()));
+        c.gridy = 5;
+        form.add(buttons, c);
+
+        feeField.setEnabled(false);
+        sharesField.setEnabled(false);
+        categoryBox.addActionListener(e ->
+                feeField.setEnabled("Food Delivery".equals(categoryBox.getSelectedItem())));
+        splitBox.addActionListener(e -> {
+            boolean custom = "Custom".equals(splitBox.getSelectedItem());
+            sharesField.setEnabled(custom);
+            for (JCheckBox box : checks) box.setEnabled(!custom);
+        });
+        return form;
+    }
+
+    private void addRow(JPanel p, GridBagConstraints c, int row,
+                        String l1, JComponent f1, String l2, JComponent f2) {
+        c.gridy = row; c.gridwidth = 1;
+        c.gridx = 0; c.weightx = 0; p.add(new JLabel(l1), c);
+        c.gridx = 1; c.weightx = 1; p.add(f1, c);
+        c.gridx = 2; c.weightx = 0; p.add(new JLabel(l2), c);
+        c.gridx = 3; c.weightx = 1; p.add(f2, c);
+    }
+
+    private JButton button(String text, ActionListener a) {
+        JButton b = new JButton(text);
+        b.addActionListener(a);
+        return b;
+    }
+
+    private TitledBorder titled(String text) {
+        TitledBorder t = BorderFactory.createTitledBorder(text);
+        t.setTitleFont(new Font("SansSerif", Font.BOLD, 12));
+        return t;
+    }
+
+    // ------------------------------------------------------------ actions
+    private void addExpense() {
+        String title = titleField.getText().trim();
+        if (title.isEmpty() || title.contains(",")) {
+            warn("Please enter a title (commas are not allowed).");
+            return;
+        }
+        double amount, fee = 0;
         try {
-            manager.addMember(new Member("Sreeram", "sreeram@gmail.com"));
-            manager.addMember(new Member("Durga", "durga@gmail.com"));
-            manager.addMember(new Member("Aditya", "aditya@gmail.com"));
-            manager.addMember(new Member("Surya", "surya@gmail.com"));
-            manager.addMember(new Member("Ravi", "ravi@gmail.com"));
-            manager.addExpense("Food", "Biryani dinner", 1200, 0, "Aditya",
-                    new ArrayList<String>(Arrays.asList("Sreeram", "Durga", "Aditya", "Surya")));
-            manager.addExpense("Travel", "Goa trip cab", 2500, 0, "Surya",
-                    new ArrayList<String>(Arrays.asList("Sreeram", "Durga", "Aditya", "Surya", "Ravi")));
-            manager.addExpense("Food Delivery", "Pizza order", 800, 50, "Sreeram",
-                    new ArrayList<String>(Arrays.asList("Sreeram", "Ravi", "Durga")));
-            HashMap<String, Double> shares = new HashMap<String, Double>();
-            shares.put("Ravi", 200.0);
-            shares.put("Sreeram", 400.0);
-            shares.put("Aditya", 300.0);
-            manager.addExpense("Other", "Movie tickets", 900, 0, "Ravi", shares);
-        } catch (Exception e) {
-            status.setText("Sample data error: " + e.getMessage());
+            amount = Double.parseDouble(amountField.getText().trim());
+        } catch (NumberFormatException ex) {
+            warn("Amount must be a number.");
+            return;
+        }
+        String type = (String) categoryBox.getSelectedItem();
+        if (type.equals("Food Delivery")) {
+            try {
+                fee = feeField.getText().trim().isEmpty() ? 0 : Double.parseDouble(feeField.getText().trim());
+            } catch (NumberFormatException ex) {
+                warn("Delivery fee must be a number.");
+                return;
+            }
+        }
+        String paidBy = (String) paidByBox.getSelectedItem();
+        if (paidBy == null) {
+            warn("Add at least one member first.");
+            return;
+        }
+
+        try {
+            if ("Custom".equals(splitBox.getSelectedItem())) {
+                manager.addExpense(type, title, amount, fee, paidBy, parseShares());   // overloaded: custom
+            } else {
+                ArrayList<String> people = new ArrayList<String>();
+                for (JCheckBox box : checks)
+                    if (box.isSelected()) people.add(box.getText());
+                manager.addExpense(type, title, amount, fee, paidBy, people);          // overloaded: equal
+            }
+        } catch (NumberFormatException ex) {
+            warn("Custom shares must look like:  Durga=200, Ravi=300");
+            return;
+        } catch (NegativeAmountException | PersonNotFoundException | InvalidSplitException ex) {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Cannot add expense",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        titleField.setText("");
+        amountField.setText("");
+        sharesField.setText("");
+        refresh();
+        tabs.setSelectedIndex(0);
+    }
+
+    // "Durga=200, Ravi=300"  ->  {Durga=200.0, Ravi=300.0}
+    private HashMap<String, Double> parseShares() {
+        HashMap<String, Double> shares = new HashMap<String, Double>();
+        for (String part : sharesField.getText().split(",")) {
+            if (part.trim().isEmpty()) continue;
+            String[] kv = part.split("=");
+            if (kv.length != 2) throw new NumberFormatException("bad share");
+            String name = kv[0].trim();
+            for (Member m : manager.getMembers())           // match the name ignoring capital letters
+                if (m.getName().equalsIgnoreCase(name)) name = m.getName();
+            shares.put(name, Double.parseDouble(kv[1].trim()));
+        }
+        return shares;
+    }
+
+    private void deleteSelected() {
+        int row = expenseTable.getSelectedRow();
+        if (row < 0) {
+            warn("Click an expense in the table first.");
+            return;
+        }
+        int id = (Integer) expenseModel.getValueAt(row, 0);
+        manager.deleteExpense(id);
+        detailsArea.setText("");
+        refresh();
+    }
+
+    private void addMember() {
+        String name = JOptionPane.showInputDialog(this, "Member name:");
+        if (name == null) return;
+        name = name.trim();
+        if (name.isEmpty() || name.matches(".*[,;=].*")) {
+            warn("Please enter a name without commas, semicolons or '='.");
+            return;
+        }
+        String email = JOptionPane.showInputDialog(this, "Email (optional):");
+        if (email == null) email = "";
+        email = email.trim().replace(",", "");
+        if (email.isEmpty()) email = "-";
+        try {
+            manager.addMember(new Member(name, email));
+        } catch (IllegalArgumentException ex) {
+            warn(ex.getMessage());
+            return;
+        }
+        rebuildPeople();
+        refresh();
+    }
+
+    private void save() {
+        try {
+            manager.saveToFile(FILE);
+            statusLabel.setText("Saved to " + FILE);
+        } catch (IOException ex) {
+            warn("Could not save: " + ex.getMessage());
         }
     }
 
-    // member names -> combo box and check boxes
-    void rebuildMembers() {
-        payer.removeAllItems();
-        people.removeAll();
-        boxes.clear();
+    private void load() {
+        try {
+            int n = manager.loadFromFile(FILE);
+            rebuildPeople();
+            refresh();
+            if (n == 0) statusLabel.setText("Nothing to load yet - save first.");
+        } catch (IOException ex) {
+            warn("Could not load: " + ex.getMessage());
+        }
+    }
+
+    private void clearForm() {
+        titleField.setText("");
+        amountField.setText("");
+        feeField.setText("0");
+        sharesField.setText("");
+        categoryBox.setSelectedIndex(0);
+        splitBox.setSelectedIndex(0);
+        for (JCheckBox box : checks) box.setSelected(true);
+    }
+
+    private void warn(String msg) {
+        JOptionPane.showMessageDialog(this, msg, "SplitMate", JOptionPane.WARNING_MESSAGE);
+    }
+
+    // ------------------------------------------------------------ refresh the screen
+    private void rebuildPeople() {
+        String keep = (String) paidByBox.getSelectedItem();
+        paidByBox.removeAllItems();
+        checkPanel.removeAll();
+        checks.clear();
+        boolean custom = "Custom".equals(splitBox.getSelectedItem());
         for (Member m : manager.getMembers()) {
-            payer.addItem(m.getName());
-            JCheckBox cb = new JCheckBox(m.getName(), true);
-            cb.setName("cb_" + m.getName());
-            boxes.add(cb);
-            people.add(cb);
+            paidByBox.addItem(m.getName());
+            JCheckBox box = new JCheckBox(m.getName(), true);
+            box.setEnabled(!custom);
+            checks.add(box);
+            checkPanel.add(box);
         }
-        people.revalidate();
-        people.repaint();
+        if (keep != null) paidByBox.setSelectedItem(keep);
+        checkPanel.revalidate();
+        checkPanel.repaint();
     }
 
-    void refresh() {
-        expModel.setRowCount(0);
-        for (Expense e : manager.getExpenses())
-            expModel.addRow(new Object[] {e.getId(), e.getTitle(), e.getCategory(), e.getPaidBy(),
+    private void refresh() {
+        // expenses tab
+        expenseModel.setRowCount(0);
+        for (Expense e : manager.getExpenses()) {
+            expenseModel.addRow(new Object[]{e.getId(), e.getTitle(), e.getCategory(), e.getPaidBy(),
                     String.format("%.2f", e.getTotal()), e.getParticipants().toString()});
+        }
 
-        balModel.setRowCount(0);
+        // balances tab
+        balanceModel.setRowCount(0);
         HashMap<String, Double> bal = manager.balances();
         for (Member m : manager.getMembers()) {
             double net = bal.get(m.getName());
-            String st = net > 0.005 ? "gets back" : net < -0.005 ? "has to pay" : "settled";
-            balModel.addRow(new Object[] {m.getName(), String.format("%.2f", manager.totalPaid(m.getName())),
-                    String.format("%.2f", manager.totalShare(m.getName())), String.format("%.2f", net), st});
+            String status = net > 0.005 ? "gets back" : net < -0.005 ? "has to pay" : "settled";
+            balanceModel.addRow(new Object[]{m.getName(),
+                    String.format("%.2f", manager.totalPaid(m.getName())),
+                    String.format("%.2f", manager.totalShare(m.getName())),
+                    String.format("%.2f", net), status});
         }
 
-        ArrayList<String> s = manager.settlements();
-        StringBuilder sb = new StringBuilder("  WHO PAYS WHOM (minimum payments)\n  ---------------------------------\n");
-        if (s.isEmpty()) sb.append("  Everyone is settled up!\n");
-        for (String line : s) sb.append("  ").append(line).append("\n");
+        // settle up tab
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n  WHO PAYS WHOM (minimum payments)\n");
+        sb.append("  --------------------------------\n");
+        ArrayList<String> list = manager.settlements();
+        if (list.isEmpty()) sb.append("  Everyone is settled up!\n");
+        for (String s : list) sb.append("  ").append(s).append("\n");
         settleArea.setText(sb.toString());
+        settleArea.setCaretPosition(0);
 
-        status.setText("Members: " + manager.getMembers().size() + "   |   Expenses: " + manager.getExpenses().size()
+        statusLabel.setText("Members: " + manager.getMembers().size()
+                + "   |   Expenses: " + manager.getExpenses().size()
                 + "   |   Total spent: Rs " + String.format("%.2f", manager.totalSpent())
                 + "   |   Expense objects created: " + Expense.getCount());
     }
 
-    void clearForm() {
-        title.setText(""); amount.setText(""); fee.setText("0"); custom.setText("");
-        category.setSelectedIndex(0); split.setSelectedIndex(0);
-        for (JCheckBox cb : boxes) cb.setSelected(true);
+    private void showDetails() {
+        int row = expenseTable.getSelectedRow();
+        if (row < 0) return;
+        Expense e = manager.findExpense((Integer) expenseModel.getValueAt(row, 0));
+        if (e == null) return;
+        StringBuilder sb = new StringBuilder();
+        sb.append("Title    : ").append(e.getTitle()).append("\n");
+        sb.append("Category : ").append(e.getCategory()).append("\n");
+        sb.append("Paid by  : ").append(e.getPaidBy()).append("\n");
+        sb.append(String.format("Total    : Rs %.2f", e.getTotal()));
+        if (e.getFee() > 0) sb.append(String.format("  (includes delivery fee Rs %.2f)", e.getFee()));
+        sb.append("\nSplit    : ").append(e.getCustomShares() != null ? "Custom" : "Equal").append("\n");
+        for (String p : e.getParticipants())
+            sb.append(String.format("   %-10s Rs %.2f%n", p, e.shareOf(p)));
+        detailsArea.setText(sb.toString());
+        detailsArea.setCaretPosition(0);
     }
 
-    // Practical 11: every button / combo box action comes here
-    public void actionPerformed(ActionEvent e) {
-        String cmd = e.getActionCommand();
+    // ------------------------------------------------------------ threads
+    private void startThreads() {
+        autoSave = new AutoSaveThread(manager, FILE, msg ->
+                SwingUtilities.invokeLater(() -> statusLabel.setText(msg)));
+        reminder = new ReminderThread(manager, msg ->
+                SwingUtilities.invokeLater(() -> reminderLabel.setText(msg.isEmpty() ? " " : msg)));
+        autoSave.start();
+        reminder.start();
+    }
+
+    private void closeApp() {
+        autoSave.stopSaving();
+        reminder.stopReminders();
         try {
-            if (cmd.equals("category")) {
-                fee.setEnabled(category.getSelectedItem().equals("Food Delivery"));
-            } else if (cmd.equals("split")) {
-                custom.setEnabled(split.getSelectedItem().equals("Custom"));
-            } else if (cmd.equals("add")) {
-                String t = title.getText().trim().replace(",", " ");
-                if (t.isEmpty()) throw new IllegalArgumentException("Please enter a title");
-                double amt = Double.parseDouble(amount.getText().trim());     // may throw NumberFormatException
-                double fe = category.getSelectedItem().equals("Food Delivery") ? Double.parseDouble(fee.getText().trim()) : 0;
-                String paidBy = (String) payer.getSelectedItem();
-                String type = (String) category.getSelectedItem();
-                if (split.getSelectedItem().equals("Equal")) {
-                    ArrayList<String> sel = new ArrayList<String>();
-                    for (JCheckBox cb : boxes) if (cb.isSelected()) sel.add(cb.getText());
-                    manager.addExpense(type, t, amt, fe, paidBy, sel);       // overloaded method 1
-                } else {
-                    HashMap<String, Double> shares = new HashMap<String, Double>();
-                    for (String part : custom.getText().split(",")) {
-                        String[] kv = part.split("=");
-                        shares.put(kv[0].trim(), Double.parseDouble(kv[1].trim()));
-                    }
-                    manager.addExpense(type, t, amt, fe, paidBy, shares);    // overloaded method 2
-                }
-                clearForm();
-                refresh();
-                tabs.setSelectedIndex(0);
-                status.setText("Expense added.   " + status.getText());
-            } else if (cmd.equals("delete")) {
-                int row = expTable.getSelectedRow();
-                if (row < 0) {
-                    JOptionPane.showMessageDialog(this, "Select an expense in the table first");
-                } else {
-                    manager.deleteExpense((Integer) expModel.getValueAt(row, 0));
-                    details.setText("");
-                    refresh();
-                }
-            } else if (cmd.equals("member")) {
-                String n = JOptionPane.showInputDialog(this, "Member name:");
-                if (n != null && !n.trim().isEmpty()) {
-                    String em = JOptionPane.showInputDialog(this, "Email:");
-                    manager.addMember(new Member(n.trim().replace(",", " "), em == null ? "NA" : em.trim().replace(",", " ")));
-                    rebuildMembers();
-                    refresh();
-                }
-            } else if (cmd.equals("settle")) {
-                refresh();
-                tabs.setSelectedIndex(2);
-            } else if (cmd.equals("clear")) {
-                clearForm();
-            } else if (cmd.equals("save")) {
-                manager.saveToFile(FILE);
-                status.setText("Saved to " + FILE);
-            } else if (cmd.equals("load")) {
-                manager.loadFromFile(FILE);
-                rebuildMembers();
-                refresh();
-                status.setText("Loaded from " + FILE + "   |   " + status.getText());
-            }
-        } catch (NumberFormatException ex) {                                   // Practical 6: exceptions
-            JOptionPane.showMessageDialog(this, "Please enter valid numbers (amount, fee, custom shares)", "Input error", JOptionPane.ERROR_MESSAGE);
-        } catch (ArrayIndexOutOfBoundsException ex) {
-            JOptionPane.showMessageDialog(this, "Custom shares must look like  Durga=200, Ravi=300", "Input error", JOptionPane.ERROR_MESSAGE);
-        } catch (NegativeAmountException ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "Invalid amount", JOptionPane.ERROR_MESSAGE);
-        } catch (PersonNotFoundException ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "Person not found", JOptionPane.ERROR_MESSAGE);
-        } catch (InvalidSplitException ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "Invalid split", JOptionPane.ERROR_MESSAGE);
+            manager.saveToFile(FILE);
         } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "File error: " + ex.getMessage(), "File error", JOptionPane.ERROR_MESSAGE);
-        } catch (IllegalArgumentException ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "Input error", JOptionPane.ERROR_MESSAGE);
+            // closing anyway
         }
+        dispose();
+        System.exit(0);
     }
-
-    // Practical 11: mouse events on the expense table
-    public void mouseClicked(MouseEvent e) {
-        int row = expTable.getSelectedRow();
-        if (row >= 0) {
-            Expense x = manager.findExpense((Integer) expModel.getValueAt(row, 0));
-            if (x != null) {
-                Settleable s = x;                                               // interface reference
-                StringBuilder sb = new StringBuilder(x.getTitle() + " (" + x.getCategory() + ")  Rs "
-                        + String.format("%.2f", x.getTotal()) + "  paid by " + x.getPaidBy() + "\n");
-                for (String p : x.getParticipants())
-                    sb.append("   ").append(p).append(" owes Rs ").append(String.format("%.2f", s.shareOf(p))).append("\n");
-                details.setText(sb.toString());
-            }
-        }
-    }
-    public void mouseEntered(MouseEvent e) { status.setText("Click an expense to see who owes what"); }
-    public void mouseExited(MouseEvent e) { refresh(); }
-    public void mousePressed(MouseEvent e) { }
-    public void mouseReleased(MouseEvent e) { }
 }
